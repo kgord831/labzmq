@@ -4,41 +4,44 @@ from device import Device
 
 import random
 import time
+import tkinter as tk
 
 if __name__ == "__main__":
     dev = Device(names.LINDA, INT=6)
+    dev.start()
 
-    def connect():
-        dev.logger.info('Linda is starting')
-        return dev.start()
+    gui_running = True
 
-    def get_int():
-        dev.logger.info('Linda wants an int')
-        dev.send([b"JOE", b"GET", b"INT"])
-        return 0
+    top = tk.Tk()
+    def on_closing():
+        global gui_running
+        gui_running = False
+    
+    def get_joe_int():
+        dev.send([b"JOE", b'GET', b"INT"])
+    
+    def get_joe_float():
+        dev.send([b'JOE', b'GET', b'FLOAT'])
+    
+    def set_joe_float():
+        dev.send([b'JOE', b'SET', b'FLOAT', pickle.dumps()])
 
-    def get_float():
-        dev.logger.info('Linda wants a float')
-        dev.send([b"JOE", b"GET", b"FLOAT"])
-        return 0
+    top.protocol("WM_DELETE_WINDOW", on_closing)
+    top.geometry("200x100")  
+    int_lbl = tk.Label(top, text="INT:")
+    int_lbl.grid(row=1,column=0)
+    int_val = tk.Label(top, text=str(dev.params['INT']))
+    int_val.grid(row=1,column=1)
+    button_joe_int = tk.Button(top, text="Get Joe INT", command=get_joe_int)
+    button_joe_float = tk.Button(top, text="Get Joe FLOAT", command=get_joe_float)
+    button_set_joe_float = tk.Button(top, text="Set Joe FLOAT", command=set_joe_float)
 
-    def leave():
-        dev.logger.info('Linda is leaving')
-        return dev.exit()
-
-    connect()
-    connected = True
-    for i in range(200):
-        if i % 20 == 1:
-            if connected:
-                task = random.choice([get_int, get_float])
-                if task == leave:
-                    connected = False
-            else:
-                task = connect
-                connected = True
-            task()
-            time.sleep(random.random())
-        dev.loop()
-    dev.logger.info('Linda program is ending')
+    while gui_running:
+        if dev.loop() < 0:
+            break
+        int_val['text'] = str(dev.params['INT'])
+        top.update_idletasks()
+        top.update()
+        # time.sleep(0.2)
+    top.destroy()
     dev.exit()

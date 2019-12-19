@@ -1,0 +1,48 @@
+# Protocol
+
+## Command List
+Device sends: HI
+Broker reply: ACK or ERR, Error message
+
+Device sends: BYE
+Broker does not reply
+
+GET, reply with RET
+SET, reply with MET
+
+HI = \x01
+BYE = \x02
+GET = ?
+SET = ?
+RET = ?
+MET = ?
+ACK = ?
+
+## Examples
+
+Linda sends: MsgID, JOE, GET, INT
+Broker may reply: MsgID, ERR, Error message
+If GET, Broker replies: MsgID, ACK
+Broker forwards to Joe: MsgID, GET, INT
+Joe may reply: MsgID, ERR, Error message
+Joe replies: MsgID, RET, INT, Value
+Broker forwards to Linda: MsgID, RET, INT, Value
+
+Linda sends: MsgID, JOE, SET, INT, 4
+Broker may reply: MsgID, ERR, Error message
+If SET, Broker replies: MsgID, ACK
+Broker forwards to Joe: MsgID, SET, INT, 4
+Joe may reply: MsgID, ERR, Error message
+Joe replies: MsgID, MET, INT, 4
+Broker forwards to Linda: MsgID, MET, INT, 4
+
+## Parameters
+
+Parameters have a name which is always a string
+Parameters have a value which could be uint, int, float, double, string, array
+
+## Error messages
+
+Device is already connected
+Device does not recognize parameter
+Device is not connected

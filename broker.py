@@ -7,6 +7,7 @@ import time
 import random
 import logger
 import errno
+import tkinter as tk
 
 NBR_DEVS = names.NBR_DEVS
 
@@ -20,6 +21,86 @@ the value for each key is a tuple (from_addr, to_addr, msg)
 devs is a python set which contain bytes representation of names
 """
 
+class Broker():
+    def __init__(self):
+        self.logger = logger.make_logger('broker.log')
+        self.ctx = zmq.Context.instance()
+        self.mailbox = make_socket(self.ctx)
+        self.devs = set()
+        self.poller = zmq.Poller()
+        self.top = tk.Tk()
+        self.setup_ui()
+        self.mail_table = {}
+        self.ui_running = True
+    
+    def setup_ui(self):
+        self.top.geometry("1000x250")
+        self.devs_frame = tk.Frame(self.top)
+        self.lbl = tk.Label(self.devs_frame, text="Connected Devices")
+        self.listbox = tk.Listbox(self.devs_frame)
+        self.lbl.pack()
+        self.listbox.pack()
+        self.devs_frame.pack(side=tk.LEFT)
+        self.log_frame = tk.Frame(self.top)
+        self.msg_log = tk.Text(self.log_frame)
+        self.msg_log.pack()
+        self.log_frame.pack(side=tk.LEFT)
+        top.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def update_ui(self):
+        self.listbox.delete(0, tk.END)
+        i = 1
+        for dev in self.devs:
+            self.listbox.insert(i, dev.decode('utf-8'))
+            i = i + 1
+        self.top.update_idletasks()
+        self.top.update()
+    
+    def on_closing(self):
+        self.ui_running = False
+    
+    def connect(self):
+        try:
+            self.mailbox.bind(names.BROKER_IN)
+        except zmq.ZMQBaseError as err:
+            raise err
+        self.poller.register(self.mailbox, zmq.POLLIN)
+    
+    def disconnect(self):
+        try:
+            self.poller.unregister(self.mailbox)
+        except KeyError:
+            pass
+        self.mailbox.close()
+        self.mailbox = make_socket(self.ctx, self.name)  # pre-emptive in case user wants to connect again
+    
+    def reset_connection(self):
+        self.disconnect()
+        self.connect()
+
+    def make_socket(ctx):
+        sock = ctx.socket(zmq.ROUTER)
+        sock.identity = 'BROKER'.encode('utf-8')
+        return sock
+    
+    def log_connections(self):
+        for id, (from_addr, to_addr, timestamp, msg) in self.mail_table.items():
+            if time.time() - timestamp > 5:
+                self.logger.debug('Message from {} to {} is older than 5 seconds'.format(from_addr.decode('utf-8'), to_addr.decode('utf-8')))
+        if len(devs) > 0:
+            self.logger.info('connected devices: {}'.format(self.devs))
+        else:
+            self.logger.info('no connected devices.')
+
+def print_mail_table(mt):
+    header_format = '{0:<34} : {1}\n'
+    row_format = '0x{0} : {1}\n'
+    mt_str = '\n'
+    mt_str += header_format.format('Msg ID', '(From, To, Timestamp, Msg)')
+    for id, msg in mt.items():
+        mt_str += row_format.format(id.hex(), msg)
+    return mt_str
+
 def main():
     """Load balancer main loop."""
     # Prepare context and sockets
@@ -31,11 +112,40 @@ def main():
     # Initialize main loop state
     count = NBR_DEVS
     devs = set()
-    poller = zmq.Poller()
+    poller = zmq.Poller() 
+    
+    # setup Tk window
+    top = tk.Tk()
+    top.geometry("1000x250")
+    devs_frame = tk.Frame(top)
+    lbl = tk.Label(devs_frame, text="Connected Devices")
+    listbox = tk.Listbox(devs_frame)
+    lbl.pack()
+    listbox.pack()
+    devs_frame.pack(side=tk.LEFT)
+    log_frame = tk.Frame(top)
+    msg_log = tk.Text(log_frame)
+    msg_log.pack()
+    log_frame.pack(side=tk.LEFT)
+    gui_running = True
 
     poller.register(frontend, zmq.POLLIN)
 
     mail_table = {}
+
+    def update_gui():
+        listbox.delete(0, tk.END)
+        i = 1
+        for dev in devs:
+            listbox.insert(i, str(dev))
+            i = i + 1
+        top.update_idletasks()
+        top.update()
+    
+    def on_closing():
+        gui_running = False
+
+    top.protocol("WM_DELETE_WINDOW", on_closing)
 
     def print_connections():
         for id, (from_addr, to_addr, timestamp, msg) in mail_table.items():
@@ -46,21 +156,15 @@ def main():
         else:
             app_log.info('no connected devices.')
 
-    def print_mail_table(mt):
-        header_format = '{0:<34} : {1}\n'
-        row_format = '0x{0} : {1}\n'
-        mt_str = '\n'
-        mt_str += header_format.format('Msg ID', '(From, To, Timestamp, Msg)')
-        for id, msg in mt.items():
-            mt_str += row_format.format(id.hex(), msg)
-        return mt_str
-
-    tasks = [print_connections]
-    times = [1]
+    tasks = [print_connections, update_gui]
+    times = [1, 0.2]
     timers = times.copy()
 
-    while True:
+    while gui_running:
         start_time = time.time()
+
+        msg_log.delete(1.0, tk.END)
+        msg_log.insert(tk.END, print_mail_table(mail_table))
 
         sockets = dict(poller.poll(20))
 
@@ -132,13 +236,17 @@ def main():
                             app_log.critical(print_mail_table(mail_table))
                         elif cmd == b'RET':
                             out_msg = [to_addr, b'', msg_id] + msg
+                            del mail_table[msg_id]
                             app_log.debug('Processed RET')
                         elif cmd == b'MET':
                             out_msg = [to_addr, b'', msg_id] + msg
+                            del mail_table[msg_id]
                             app_log.debug('Processed MET')
                         elif cmd == b'ERR':
+                            del mail_table[msg_id]
                             out_msg = [to_addr, b'', msg_id] + msg
                         else:
+                            del mail_table[msg_id]
                             out_msg = [to_addr, b'', msg_id, b'ERR', b'Device replied poorly']
                             app_log.warning('{} sent unrecognized response: {}'.format(from_addr, msg))
                     else:
@@ -163,13 +271,11 @@ def main():
             if x < 0:
                 tasks[i]()
                 timers[i] = times[i]
-    
-    while True:
-        pass
 
     # Clean up
     frontend.close()
     context.term()
+    top.destroy()
 
 if __name__ == "__main__":
     main()
